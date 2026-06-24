@@ -1,0 +1,50 @@
+{
+  "label": "Scenario 2 — Drift (Scope Creep): coupon code PR touches auth service",
+  "intent": {
+    "id": "intent_jira_INT-402",
+    "source_system": "jira",
+    "source_id": "INT-402",
+    "title": "Add coupon code support at checkout",
+    "raw_context": "Users should be able to enter a coupon code at checkout. The discount should be applied before the final charge is processed. Changes are scoped to the payment service only.",
+    "acceptance_criteria": [
+      "A coupon code input field is visible on the checkout screen",
+      "Valid codes apply the correct discount to the total",
+      "Invalid codes return a user-friendly error",
+      "All changes are contained within payment_service"
+    ],
+    "scoped_services": ["payment_service"],
+    "status": "IN_PROGRESS",
+    "owner": {
+      "unified_user_id": "user_002",
+      "display_name": "Jordan Kim",
+      "email": "jordan@interstellar.dev"
+    },
+    "last_updated_at": "2026-06-20T10:00:00Z"
+  },
+  "execution": {
+    "id": "exec_gh_pr_85",
+    "source_system": "github",
+    "source_id": "85",
+    "title": "INT-402: Add coupon code + refactor auth token handling",
+    "summary": "Implements coupon code logic and also refactors session token expiry in user_auth_service while I was in here.",
+    "author": {
+      "unified_user_id": "user_002",
+      "display_name": "Jordan Kim",
+      "email": "jordan@interstellar.dev"
+    },
+    "push_type": "pull_request",
+    "target_branch": "main",
+    "status": "OPEN",
+    "changeset": {
+      "impacted_files": [
+        "payment_service/checkout.ts",
+        "payment_service/coupon.ts",
+        "user_auth_service/session.ts",
+        "user_auth_service/token.ts"
+      ],
+      "diff_summary": "Added coupon validation in payment_service. Also refactored session token expiry logic in user_auth_service — this was out of scope for the original ticket."
+    },
+    "linked_intent_ids": ["INT-402"],
+    "last_updated_at": "2026-06-21T11:00:00Z"
+  }
+}

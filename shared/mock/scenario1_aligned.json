@@ -1,0 +1,49 @@
+{
+  "label": "Scenario 1 — Aligned: coupon code, payments only",
+  "intent": {
+    "id": "intent_jira_INT-401",
+    "source_system": "jira",
+    "source_id": "INT-401",
+    "title": "Add coupon code support at checkout",
+    "raw_context": "Users should be able to enter a coupon code at checkout. The discount should be applied before the final charge is processed. Changes are scoped to the payment service only.",
+    "acceptance_criteria": [
+      "A coupon code input field is visible on the checkout screen",
+      "Valid codes apply the correct discount to the total",
+      "Invalid codes return a user-friendly error",
+      "All changes are contained within payment_service"
+    ],
+    "scoped_services": ["payment_service"],
+    "status": "IN_PROGRESS",
+    "owner": {
+      "unified_user_id": "user_001",
+      "display_name": "Alex Rivera",
+      "email": "alex@interstellar.dev"
+    },
+    "last_updated_at": "2026-06-20T10:00:00Z"
+  },
+  "execution": {
+    "id": "exec_gh_pr_84",
+    "source_system": "github",
+    "source_id": "84",
+    "title": "INT-401: Add coupon code to checkout flow",
+    "summary": "Implements coupon code input and discount logic. All changes in payment_service.",
+    "author": {
+      "unified_user_id": "user_001",
+      "display_name": "Alex Rivera",
+      "email": "alex@interstellar.dev"
+    },
+    "push_type": "pull_request",
+    "target_branch": "main",
+    "status": "OPEN",
+    "changeset": {
+      "impacted_files": [
+        "payment_service/checkout.ts",
+        "payment_service/coupon.ts",
+        "payment_service/tests/coupon.test.ts"
+      ],
+      "diff_summary": "Added coupon validation logic and discount application in payment_service. No other services touched."
+    },
+    "linked_intent_ids": ["INT-401"],
+    "last_updated_at": "2026-06-21T09:30:00Z"
+  }
+}
