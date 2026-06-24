@@ -1,0 +1,88 @@
+{
+  "_label": "Raw Jira API response — INT-402 coupon code ticket",
+  "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+  "id": "10042",
+  "key": "INT-402",
+  "fields": {
+    "summary": "Add coupon code support at checkout",
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Users should be able to enter a promo/coupon code on the checkout page and receive the corresponding discount before payment is processed."
+            }
+          ]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Acceptance criteria:"
+            }
+          ]
+        },
+        {
+          "type": "bulletList",
+          "content": [
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [{ "type": "text", "text": "Coupon code field appears on checkout page" }]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [{ "type": "text", "text": "Valid code applies discount to order total" }]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [{ "type": "text", "text": "Invalid code shows clear error message" }]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [{ "type": "text", "text": "Only payment_service is modified — no changes to auth or user flows" }]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "status": {
+      "id": "3",
+      "name": "In Progress",
+      "statusCategory": { "key": "indeterminate", "name": "In Progress" }
+    },
+    "assignee": {
+      "accountId": "user_jordan_kim_001",
+      "displayName": "Jordan Kim",
+      "emailAddress": "jordan@interstellar.dev"
+    },
+    "updated": "2026-06-19T09:00:00.000+0000",
+    "created": "2026-06-15T08:00:00.000+0000",
+    "priority": { "name": "Medium" },
+    "issuetype": { "name": "Story" }
+  }
+}
