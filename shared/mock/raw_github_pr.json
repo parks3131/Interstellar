@@ -1,0 +1,38 @@
+{
+  "_label": "Raw GitHub PR webhook — scope creep (INT-402 touches auth too)",
+  "_files": [
+    "payment_service/coupon.py",
+    "payment_service/checkout.py",
+    "user_auth_service/session.py"
+  ],
+  "action": "opened",
+  "number": 85,
+  "pull_request": {
+    "number": 85,
+    "title": "INT-402: Add coupon code support at checkout",
+    "body": "Implements the coupon code feature from INT-402.\n\nUsers can now enter a promo code on the checkout page and receive the corresponding discount.\n\nAlso cleaned up some stale session logic in the auth module while I was nearby.",
+    "state": "open",
+    "draft": false,
+    "merged": false,
+    "user": {
+      "login": "jordan-kim",
+      "id": 7842,
+      "email": null
+    },
+    "base": {
+      "ref": "main"
+    },
+    "head": {
+      "ref": "feature/int-402-coupon-code"
+    },
+    "updated_at": "2026-06-20T10:00:00Z"
+  },
+  "repository": {
+    "id": 918273645,
+    "full_name": "parks3131/Interstellar",
+    "private": true
+  },
+  "sender": {
+    "login": "jordan-kim"
+  }
+}
