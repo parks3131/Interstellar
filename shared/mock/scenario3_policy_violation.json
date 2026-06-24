@@ -1,0 +1,46 @@
+{
+  "label": "Scenario 3 — Drift (Policy Violation): direct push to main on a critical bug ticket",
+  "intent": {
+    "id": "intent_jira_INT-403",
+    "source_system": "jira",
+    "source_id": "INT-403",
+    "title": "[CRITICAL] Fix payment processing failure in production",
+    "raw_context": "Production payments are failing for 15% of users. Root cause identified as a null pointer in payment_service/charge.ts. Fix must go through proper review — this touches billing.",
+    "acceptance_criteria": [
+      "Null pointer in charge.ts is resolved",
+      "Fix is reviewed by at least one senior engineer",
+      "Change goes through a PR — no direct pushes to main given the sensitivity"
+    ],
+    "scoped_services": ["payment_service"],
+    "status": "IN_PROGRESS",
+    "owner": {
+      "unified_user_id": "user_003",
+      "display_name": "Sam Patel",
+      "email": "sam@interstellar.dev"
+    },
+    "last_updated_at": "2026-06-22T08:00:00Z"
+  },
+  "execution": {
+    "id": "exec_gh_push_commit_9f3a",
+    "source_system": "github",
+    "source_id": "9f3a2c1",
+    "title": "hotfix: fix null pointer in charge.ts",
+    "summary": "",
+    "author": {
+      "unified_user_id": "user_003",
+      "display_name": "Sam Patel",
+      "email": "sam@interstellar.dev"
+    },
+    "push_type": "direct_push",
+    "target_branch": "main",
+    "status": "DIRECT_PUSH",
+    "changeset": {
+      "impacted_files": [
+        "payment_service/charge.ts"
+      ],
+      "diff_summary": "Fixed null pointer dereference on line 42 of charge.ts. Pushed directly to main with no PR, no description, no review."
+    },
+    "linked_intent_ids": ["INT-403"],
+    "last_updated_at": "2026-06-22T08:45:00Z"
+  }
+}
