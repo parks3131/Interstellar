@@ -44,3 +44,18 @@ class DriftAnalysis(BaseModel):
     drift_detected: bool
     severity: Literal['NONE', 'LOW', 'HIGH', 'CRITICAL']
     reasoning: str
+
+class AffectedService(BaseModel):
+    service_name: str
+    action: Literal['revert', 'move_to_separate_pr', 'update_intent']
+    reason: str
+
+class RemediationSpec(BaseModel):
+    pr_number: int
+    jira_key: str
+    severity: Literal['NONE', 'LOW', 'HIGH', 'CRITICAL']
+    summary: str
+    affected_services: list[AffectedService]
+    suggested_pr_description: str
+    owner: str
+    action_required: Literal['none', 'revise_pr', 'update_jira', 'escalate']
