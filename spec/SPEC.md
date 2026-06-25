@@ -342,23 +342,110 @@ GET /drift-history → returns event with nested remediation_spec, status: open
 
 ---
 
-## Phase 6 — Slack Notification (next)
+## Phase 6 — Slack Notification ✅
 
 **Goal:** When drift is detected and a spec is generated, post a Slack message to the right channel so the right person is interrupted in real time.
 
-**What to build:**
-- Slack incoming webhook (no bot needed, just a webhook URL)
-- After spec generation in `/ingest/github`, post a formatted message:
-  ```
-  🚨 Drift detected — PR #6 (SCRUM-5)
-  Severity: HIGH
-  SCRUM-5 scopes to payment_service only. PR also touches user_auth_service and ingestion.
-  Action required: Revise PR
-  → github.com/parks3131/Interstellar/pull/6
-  ```
-- New env var: `SLACK_WEBHOOK_URL`
+**What was built:**
 
-**Why this matters:** Right now drift prints to a terminal only you can see. Slack makes it visible to the whole team the moment it happens.
+| File | Change |
+|---|---|
+| `reasoning/main.py` | `_notify_slack()` — fires after `_save_to_db()` when drift detected |
+
+**How it works:**
+- Uses a Slack incoming webhook — no bot, no OAuth, just a POST to a URL
+- Called after spec generation and DB write in `/ingest/github`
+- Degrades gracefully — if `SLACK_WEBHOOK_URL` is not set or the call fails, the rest of the flow is unaffected
+
+**Message format:**
+```
+🚨 Drift detected — PR #13 (SCRUM-5)
+Severity: HIGH
+Reasoning: The PR only modifies an unrelated test file and does not implement any payment_service changes.
+Action required: Revise Pr
+Repo: https://github.com/parks3131/Interstellar/pull/13
+```
+
+**Slack setup:**
+- Workspace: `Interstellar`
+- Channel: `#drift-alerts`
+- App: `Interstellar` (incoming webhook)
+
+**New env var:**
+```
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+```
+
+**Live test result — PR #13 (SCRUM-5):**
+Slack message appeared in `#drift-alerts` instantly when the PR was opened. Severity HIGH, correct reasoning, clickable repo link.
+
+---
+
+## Phase 7 — Graph Layer (after Phase 6)
+
+**Goal:** Connect entities across tools into a knowledge graph so Interstellar can answer relationship questions — not just log events.
+
+**Why this matters:** Postgres stores what happened. The graph stores how things connect. Once you have enough drift events across PRs, engineers, services, and tickets, you need to traverse relationships — not scan rows.
+
+**Questions the graph enables:**
+- Which engineers consistently drift on the same service?
+- Which Jira tickets share the same service scope and are likely to conflict?
+- Which Slack decisions influenced the most scope creep?
+- Show me everything connected to this incident
+
+**What to build:**
+- Neo4j Aura (free tier — hosted, no infra)
+- Nodes: `Engineer`, `PR`, `JiraTicket`, `Service`, `DriftEvent`
+- Edges: `authored`, `linked_to`, `scoped_to`, `drifted_on`, `produced`
+- Populate graph on every drift event (alongside Postgres write)
+- New endpoint: `GET /graph/engineer/:id` — returns all PRs, tickets, services connected to an engineer
+
+**Storage split:**
+```
+Postgres (Supabase)     →  event log — what happened, when
+Neo4j (Aura)            →  knowledge graph — how entities connect
+```
+
+---
+
+## Phase 8 — Dashboard (after Phase 7)
+
+**Goal:** Surface drift history, trends, and ownership in a visual UI so the team doesn't have to curl endpoints to see what's happening.
+
+**What to build:**
+- Simple web frontend (Next.js or plain React)
+- Reads from `GET /drift-history` and graph endpoints
+- Views:
+  - **Drift feed** — all events, newest first, with severity badge and spec inline
+  - **Service heatmap** — which services drift the most
+  - **Engineer view** — drift history per author
+  - **Acknowledge button** — calls `POST /acknowledge` directly from the UI
+
+**Why after Phase 7:** The dashboard is most useful when it can show graph-connected data — not just a flat list of events.
+
+---
+
+## Phase 9 — Agent Execution (after Phase 8)
+
+**Goal:** Close the loop fully. Instead of telling a human to revise the PR, hand the remediation spec to an AI agent and let it act.
+
+**What to build:**
+- Agent receives a `RemediationSpec` with `action_required: revise_pr`
+- Agent opens the PR, reads the diff, removes out-of-scope changes, updates the PR description
+- Agent posts a comment on the PR: "Scope corrected per SCRUM-5 — removed changes to user_auth_service"
+- Human reviews and merges
+
+**Full loop:**
+```
+GitHub PR opened
+→ Interstellar detects drift
+→ Spec generated
+→ Agent revises PR automatically
+→ Human reviews revised PR
+→ Merge
+```
+
+**This is the end state:** Interstellar doesn't just flag drift — it fixes it.
 
 ---
 

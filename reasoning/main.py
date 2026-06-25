@@ -1,5 +1,6 @@
 import json
 import os
+import requests
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -24,6 +25,7 @@ db = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 MODEL = os.getenv("REASONING_MODEL", "openai/gpt-oss-120b")
 SYSTEM_PROMPT = Path("prompts/drift_detection.txt").read_text()
 SPEC_PROMPT = Path("prompts/spec_generation.txt").read_text()
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
 
 def _run_reasoning(intent, execution) -> DriftAnalysis:
@@ -81,6 +83,25 @@ DriftAnalysis:
     except Exception as e:
         print(f"[spec_generation] Failed: {e}")
         return None
+
+
+def _notify_slack(drift: DriftAnalysis, spec: RemediationSpec, pr_number: int, jira_key: str, repo: str):
+    if not SLACK_WEBHOOK_URL:
+        print("[slack] SLACK_WEBHOOK_URL not set — skipping")
+        return
+    try:
+        action = spec.action_required.replace("_", " ").title() if spec else "Review required"
+        message = (
+            f":rotating_light: *Drift detected — PR #{pr_number} ({jira_key})*\n"
+            f"*Severity:* {drift.severity}\n"
+            f"*Reasoning:* {drift.reasoning}\n"
+            f"*Action required:* {action}\n"
+            f"*Repo:* https://github.com/{repo}/pull/{pr_number}"
+        )
+        requests.post(SLACK_WEBHOOK_URL, json={"text": message}, timeout=5)
+        print(f"[slack] notification sent for PR #{pr_number}")
+    except Exception as e:
+        print(f"[slack] failed to send notification: {e}")
 
 
 def _save_to_db(drift: DriftAnalysis, spec, pr_number: int, jira_key: str, repo: str):
@@ -198,6 +219,7 @@ async def ingest_github(request: Request):
         else:
             print(f"[ingest/github] spec generation failed — drift result preserved")
         _save_to_db(result, spec, pr_number, jira_key, repo)
+        _notify_slack(result, spec, pr_number, jira_key, repo)
 
     return {
         "pr": pr_number,
