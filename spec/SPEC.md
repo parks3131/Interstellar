@@ -253,83 +253,96 @@ The Jira ticket scoped work to `payment_service` only. The real PR touched `reas
 
 ---
 
-## Phase 4 — Spec Generation (next)
+## Phase 4 — Spec Generation ✅
 
 **Goal:** When drift is detected, don't just log it — generate a structured remediation spec that tells someone exactly what to do to realign the PR with the intent. This completes the core loop: detect → specify → act.
 
-**What to build:**
+**What was built:**
 
 | File | What it does |
 |---|---|
-| `reasoning/models.py` | Add `RemediationSpec` Pydantic model |
-| `reasoning/prompts/spec_generation.txt` | New system prompt for spec generation |
-| `reasoning/main.py` | Call spec generation after drift detected in `/ingest/github` |
+| `reasoning/models.py` | Added `AffectedService` and `RemediationSpec` Pydantic models |
+| `reasoning/prompts/spec_generation.txt` | System prompt — LLM returns only 4 judgment fields; code fills the rest |
+| `reasoning/main.py` | `_run_spec_generation()` — second LLM call after drift detected; degrades gracefully on failure |
+| `reasoning/scripts/test_spec_generation.py` | Standalone test — runs drift + spec against scenario2 mock, no server needed |
 
-**`RemediationSpec` schema (to add to `models.py`):**
-```python
-class AffectedService(BaseModel):
-    service_name: str
-    action: Literal['revert', 'move_to_separate_pr', 'update_intent']
-    reason: str
+**Key decisions:**
+- LLM returns only judgment fields: `summary`, `affected_services`, `suggested_pr_description`, `action_required`
+- Code fills known fields: `pr_number`, `jira_key`, `severity`, `owner` — never ask the LLM for data you already have
+- Spec generation failure returns `remediation_spec: null` — drift result is never lost
 
-class RemediationSpec(BaseModel):
-    pr_number: int
-    jira_key: str
-    severity: Literal['NONE', 'LOW', 'HIGH', 'CRITICAL']
-    summary: str                    # one sentence: what drifted and why it matters
-    affected_services: list[AffectedService]
-    suggested_pr_description: str   # rewritten PR body that would be aligned
-    owner: str                      # display name of the PR author
-    action_required: Literal['none', 'revise_pr', 'update_jira', 'escalate']
+**How to test (no server, no credentials except OPENROUTER_API_KEY):**
+```bash
+cd reasoning && .venv/bin/python scripts/test_spec_generation.py
 ```
 
-**New system prompt (`reasoning/prompts/spec_generation.txt`):**
-```
-You are Interstellar's spec generator. Given a DriftAnalysis and the IntentObject + ExecutionObject that produced it, generate a RemediationSpec.
-Return JSON only. No markdown.
-Schema: { "summary": str, "affected_services": [{"service_name": str, "action": "revert"|"move_to_separate_pr"|"update_intent", "reason": str}], "suggested_pr_description": str, "action_required": "none"|"revise_pr"|"update_jira"|"escalate" }
-```
-
-**Flow change in `/ingest/github`:**
-```
-drift detected → call spec generation LLM → return RemediationSpec alongside DriftAnalysis
-```
-
-**Expected output for SCRUM-5 / PR #6:**
+**Live test result — PR #10 (SCRUM-5):**
 ```json
 {
-  "pr_number": 6,
+  "pr_number": 10,
   "jira_key": "SCRUM-5",
   "severity": "HIGH",
-  "summary": "PR modifies user_auth_service and ingestion layer but SCRUM-5 scopes work to payment_service only.",
+  "summary": "The PR modifies reasoning/out_of_scope_change.py, which is outside the payment_service scope required for SCRUM-5.",
   "affected_services": [
-    {"service_name": "user_auth_service", "action": "move_to_separate_pr", "reason": "Not in scope for SCRUM-5"},
-    {"service_name": "ingestion", "action": "move_to_separate_pr", "reason": "Not in scope for SCRUM-5"}
+    {"service_name": "reasoning", "action": "revert", "reason": "Changes to reasoning/out_of_scope_change.py are unrelated to coupon code support and violate the intent that only payment_service be touched."}
   ],
-  "suggested_pr_description": "Implements coupon code logic in payment_service only. Adds coupon validation endpoint and discount calculation. No other services touched.",
+  "suggested_pr_description": "Implements coupon code support at checkout as defined in SCRUM-5...",
+  "owner": "parks3131",
   "action_required": "revise_pr"
 }
 ```
 
 ---
 
-## Phase 5 — Database (after Phase 4)
+## Phase 5 — Database ✅
 
 **Goal:** Persist every drift event and generated spec so they can be reviewed, acknowledged, and surfaced in a dashboard.
 
-**What to build:**
-- PostgreSQL via Supabase (free tier, no infra to manage)
-- Tables: `drift_events`, `remediation_specs`, `acknowledged_flags`
-- `drift_events`: pr_number, jira_key, severity, reasoning, timestamp, repo
-- `remediation_specs`: links to drift_event, full spec JSON, status (open / acknowledged / resolved)
-- New endpoint: `GET /drift-history` — returns all past events
-- New endpoint: `POST /acknowledge` — marks a drift event as seen/handled
+**What was built:**
 
-**Why Supabase:** Gives you a Postgres DB + REST API + dashboard with zero server setup. Free tier is enough for this project.
+| File | Change |
+|---|---|
+| `reasoning/main.py` | Supabase client, `_save_to_db()`, `GET /drift-history`, `POST /acknowledge` |
+| `reasoning/requirements.txt` | Added `supabase==2.31.0` |
+
+**Database:** PostgreSQL via Supabase (project: `interstellar`, region: `us-east-1`)
+
+**Tables:**
+```sql
+drift_events        — pr_number, jira_key, severity, reasoning, repo, created_at
+remediation_specs   — drift_event_id (FK), spec (jsonb), status, created_at
+acknowledged_flags  — drift_event_id (FK), note, acknowledged_at
+```
+
+**Spec status lifecycle:**
+```
+open → acknowledged → resolved
+```
+- `open` — drift detected, nobody has acted yet
+- `acknowledged` — team marked it via `POST /acknowledge`
+- `resolved` — PR revised or Jira updated (future phase)
+
+**New endpoints:**
+- `GET /drift-history` — returns all drift events with nested remediation specs
+- `POST /acknowledge` — body: `{"drift_event_id": int, "note": str | null}`
+
+**DB write degrades gracefully** — if Supabase is unreachable, drift + spec still return in the response; only persistence fails.
+
+**New env vars required:**
+```
+SUPABASE_URL=https://kjdlggncnwcsfbxypexi.supabase.co
+SUPABASE_KEY=your_secret_key
+```
+
+**Live test result — PR #10:**
+```
+[db] saved drift_event id=1
+GET /drift-history → returns event with nested remediation_spec, status: open
+```
 
 ---
 
-## Phase 6 — Slack Notification (after Phase 5)
+## Phase 6 — Slack Notification (next)
 
 **Goal:** When drift is detected and a spec is generated, post a Slack message to the right channel so the right person is interrupted in real time.
 
@@ -361,6 +374,8 @@ All secrets live in `reasoning/.env` — never committed. Template in `reasoning
 | `JIRA_BASE_URL` | — | `https://rpkparks.atlassian.net` |
 | `JIRA_EMAIL` | — | `rpkparks@gmail.com` |
 | `JIRA_API_TOKEN` | id.atlassian.com/manage-profile/security/api-tokens | Fetch Jira tickets |
+| `SUPABASE_URL` | supabase.com project settings | Supabase DB client |
+| `SUPABASE_KEY` | supabase.com project settings → API Keys → Secret | Supabase DB client |
 | `SLACK_WEBHOOK_URL` | Phase 6 — api.slack.com/apps | Post drift alerts |
 
 **Rotate all tokens after sharing in chat.** Generate new ones and update `.env` directly.
