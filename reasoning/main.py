@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 from supabase import create_client
+from neo4j import GraphDatabase
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from models import AnalyzeRequest, DriftAnalysis, RemediationSpec
@@ -21,6 +22,11 @@ client = OpenAI(
 )
 
 db = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+
+NEO4J_URI = os.getenv("NEO4J_URI")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+graph_driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD)) if NEO4J_URI and NEO4J_PASSWORD else None
 
 MODEL = os.getenv("REASONING_MODEL", "openai/gpt-oss-120b")
 SYSTEM_PROMPT = Path("prompts/drift_detection.txt").read_text()
@@ -44,7 +50,10 @@ ExecutionObject:
             {"role": "user", "content": user_message},
         ],
     )
-    raw = response.choices[0].message.content.strip()
+    content = response.choices[0].message.content
+    if not content:
+        raise HTTPException(status_code=500, detail="LLM returned empty response — retry the request")
+    raw = content.strip()
     try:
         return DriftAnalysis(**json.loads(raw))
     except Exception:
@@ -104,7 +113,7 @@ def _notify_slack(drift: DriftAnalysis, spec: RemediationSpec, pr_number: int, j
         print(f"[slack] failed to send notification: {e}")
 
 
-def _save_to_db(drift: DriftAnalysis, spec, pr_number: int, jira_key: str, repo: str):
+def _save_to_db(drift: DriftAnalysis, spec, pr_number: int, jira_key: str, repo: str) -> int | None:
     try:
         row = db.table("drift_events").insert({
             "pr_number": pr_number,
@@ -124,8 +133,89 @@ def _save_to_db(drift: DriftAnalysis, spec, pr_number: int, jira_key: str, repo:
             }).execute()
 
         print(f"[db] saved drift_event id={event_id}")
+        return event_id
     except Exception as e:
         print(f"[db] write failed: {e}")
+        return None
+
+
+def _save_to_graph(intent, execution, pr_number: int, jira_key: str, repo: str):
+    """Always called — writes base nodes and edges for every PR regardless of drift."""
+    if not graph_driver:
+        print("[graph] NEO4J_URI not set — skipping")
+        return
+    try:
+        engineer_id = execution.author.unified_user_id
+        pr_id = f"pr_{pr_number}"
+
+        with graph_driver.session() as session:
+            session.run("""
+                MERGE (e:Engineer {id: $engineer_id})
+                  SET e.name = $engineer_name
+                WITH e
+                MERGE (pr:PR {id: $pr_id})
+                  SET pr.number = $pr_number, pr.repo = $repo, pr.title = $pr_title
+                WITH e, pr
+                MERGE (jira:JiraTicket {id: $jira_key})
+                  SET jira.title = $jira_title
+                WITH e, pr, jira
+                MERGE (e)-[:AUTHORED]->(pr)
+                MERGE (pr)-[:LINKED_TO]->(jira)
+            """, {
+                "engineer_id": engineer_id,
+                "engineer_name": execution.author.display_name,
+                "pr_id": pr_id,
+                "pr_number": pr_number,
+                "repo": repo,
+                "pr_title": execution.title,
+                "jira_key": jira_key,
+                "jira_title": intent.title,
+            })
+
+            for svc in intent.scoped_services:
+                session.run("""
+                    MERGE (s:Service {id: $svc})
+                    WITH s
+                    MATCH (jira:JiraTicket {id: $jira_key})
+                    MERGE (jira)-[:SCOPED_TO]->(s)
+                """, {"svc": svc, "jira_key": jira_key})
+
+        print(f"[graph] base nodes written — PR #{pr_number}, engineer {engineer_id}")
+    except Exception as e:
+        print(f"[graph] base write failed: {e}")
+
+
+def _save_drift_to_graph(execution, drift: DriftAnalysis, spec, event_id: int, pr_number: int):
+    """Called only when drift detected — layers DriftEvent node and drift edges onto existing PR."""
+    if not graph_driver or event_id is None:
+        return
+    try:
+        pr_id = f"pr_{pr_number}"
+        drifted_services = [a.service_name for a in spec.affected_services] if spec else []
+
+        with graph_driver.session() as session:
+            session.run("""
+                MATCH (pr:PR {id: $pr_id})
+                CREATE (event:DriftEvent {id: $event_id, severity: $severity, reasoning: $reasoning})
+                CREATE (event)-[:PRODUCED]->(pr)
+            """, {
+                "pr_id": pr_id,
+                "event_id": event_id,
+                "severity": drift.severity,
+                "reasoning": drift.reasoning,
+            })
+
+            for svc in drifted_services:
+                session.run("""
+                    MERGE (s:Service {id: $svc})
+                    WITH s
+                    MATCH (pr:PR {id: $pr_id})
+                    MERGE (pr)-[:DRIFTED_ON]->(s)
+                """, {"svc": svc, "pr_id": pr_id})
+
+        print(f"[graph] drift event {event_id} written — PR #{pr_number}")
+    except Exception as e:
+        print(f"[graph] drift write failed: {e}")
 
 
 class AcknowledgeRequest(BaseModel):
@@ -211,6 +301,8 @@ async def ingest_github(request: Request):
     print(f"[ingest/github] drift={result.drift_detected} severity={result.severity}")
     print(f"[ingest/github] reasoning: {result.reasoning}")
 
+    _save_to_graph(intent, execution, pr_number, jira_key, repo)
+
     spec = None
     if result.drift_detected:
         spec = _run_spec_generation(intent, execution, result, pr_number, jira_key)
@@ -218,7 +310,8 @@ async def ingest_github(request: Request):
             print(f"[ingest/github] spec generated: action_required={spec.action_required}")
         else:
             print(f"[ingest/github] spec generation failed — drift result preserved")
-        _save_to_db(result, spec, pr_number, jira_key, repo)
+        event_id = _save_to_db(result, spec, pr_number, jira_key, repo)
+        _save_drift_to_graph(execution, result, spec, event_id, pr_number)
         _notify_slack(result, spec, pr_number, jira_key, repo)
 
     return {
@@ -228,6 +321,53 @@ async def ingest_github(request: Request):
         "severity": result.severity,
         "reasoning": result.reasoning,
         "remediation_spec": spec.model_dump() if spec else None,
+    }
+
+
+@app.get("/graph/engineer/{engineer_id}")
+async def graph_engineer(engineer_id: str):
+    if not graph_driver:
+        raise HTTPException(status_code=503, detail="Graph database not configured")
+    with graph_driver.session() as session:
+        records = session.run("""
+            MATCH (e:Engineer {id: $id})-[:AUTHORED]->(pr:PR)
+            OPTIONAL MATCH (pr)-[:LINKED_TO]->(jira:JiraTicket)
+            OPTIONAL MATCH (pr)-[:DRIFTED_ON]->(drifted:Service)
+            OPTIONAL MATCH (event:DriftEvent)-[:PRODUCED]->(pr)
+            WITH e, pr, jira,
+                 collect(DISTINCT drifted.id) AS drifted_services,
+                 collect(DISTINCT event {.id, .severity, .reasoning}) AS drift_events
+            RETURN
+                e.id AS engineer_id,
+                e.name AS engineer_name,
+                pr.number AS pr_number,
+                pr.title AS pr_title,
+                pr.repo AS repo,
+                jira.id AS jira_key,
+                jira.title AS jira_title,
+                drifted_services,
+                drift_events
+        """, {"id": engineer_id})
+        rows = [r.data() for r in records]
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Engineer '{engineer_id}' not found in graph")
+
+    return {
+        "engineer_id": rows[0]["engineer_id"],
+        "engineer_name": rows[0]["engineer_name"],
+        "pull_requests": [
+            {
+                "pr_number": r["pr_number"],
+                "pr_title": r["pr_title"],
+                "repo": r["repo"],
+                "jira_key": r["jira_key"],
+                "jira_title": r["jira_title"],
+                "drifted_services": r["drifted_services"],
+                "drift_events": [e for e in r["drift_events"] if e.get("id") is not None],
+            }
+            for r in rows
+        ],
     }
 
 
