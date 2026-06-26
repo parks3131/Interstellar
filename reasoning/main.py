@@ -7,6 +7,7 @@ from openai import OpenAI
 from supabase import create_client
 from neo4j import GraphDatabase
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from models import AnalyzeRequest, DriftAnalysis, RemediationSpec
 from adapters.github import transform_github_payload, fetch_pr_files
@@ -15,6 +16,13 @@ from adapters.jira import fetch_jira_issue
 load_dotenv()
 
 app = FastAPI(title="Interstellar Reasoning Engine")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
