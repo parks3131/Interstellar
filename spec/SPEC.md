@@ -46,6 +46,21 @@ Interstellar/
 │   ├── requirements.txt
 │   ├── .env                # Secret keys — never committed
 │   └── .env.example        # Template showing what keys are needed
+├── dashboard/              # Next.js 16 frontend (Phase 8)
+│   ├── app/
+│   │   ├── page.tsx                    # Drift feed — server component
+│   │   ├── layout.tsx                  # Root layout with Geist font
+│   │   ├── globals.css                 # Tailwind v4 + dark theme
+│   │   ├── lib/
+│   │   │   └── types.ts                # TypeScript types matching API shapes
+│   │   ├── components/
+│   │   │   ├── DriftCard.tsx           # Per-event card with spec, services, owner link
+│   │   │   ├── ServiceHeatmap.tsx      # Bar chart computed from affected_services
+│   │   │   └── AcknowledgeButton.tsx   # Client component — POSTs to /acknowledge
+│   │   └── engineer/[id]/
+│   │       └── page.tsx                # Engineer view — pulls from /graph/engineer/{id}
+│   ├── .env.local                      # NEXT_PUBLIC_API_URL=http://localhost:8000
+│   └── package.json
 ├── shared/
 │   └── mock/               # Static test scenarios (no real APIs needed)
 │       ├── scenario1_aligned.json
@@ -451,20 +466,44 @@ NEO4J_PASSWORD=your_generated_password
 
 ---
 
-## Phase 8 — Dashboard (after Phase 7)
+## Phase 8 — Dashboard ✅
 
 **Goal:** Surface drift history, trends, and ownership in a visual UI so the team doesn't have to curl endpoints to see what's happening.
 
-**What to build:**
-- Simple web frontend (Next.js or plain React)
-- Reads from `GET /drift-history` and graph endpoints
-- Views:
-  - **Drift feed** — all events, newest first, with severity badge and spec inline
-  - **Service heatmap** — which services drift the most
-  - **Engineer view** — drift history per author
-  - **Acknowledge button** — calls `POST /acknowledge` directly from the UI
+**What was built:**
 
-**Why after Phase 7:** The dashboard is most useful when it can show graph-connected data — not just a flat list of events.
+| File | Role |
+|---|---|
+| `dashboard/app/page.tsx` | Drift feed — server component, fetches `/drift-history`, renders all events newest-first |
+| `dashboard/app/components/DriftCard.tsx` | Per-event card: severity badge, reasoning, remediation summary, service tags, owner link, acknowledge button |
+| `dashboard/app/components/ServiceHeatmap.tsx` | Bar chart: counts `affected_services` across all events, colour-coded by frequency |
+| `dashboard/app/components/AcknowledgeButton.tsx` | Client component — POSTs to `/acknowledge`, flips to "✓ Acknowledged" instantly |
+| `dashboard/app/engineer/[id]/page.tsx` | Engineer view — calls `/graph/engineer/{id}`, shows all PRs with Aligned / drift badges, Jira keys, and per-event reasoning |
+| `dashboard/app/lib/types.ts` | TypeScript types matching exact shapes returned by `/drift-history` and `/graph/engineer/{id}` |
+| `reasoning/main.py` | Added `CORSMiddleware` for `http://localhost:3000` so the dashboard can call the FastAPI backend |
+
+**Stack:** Next.js 16 + Tailwind v4 + TypeScript, dark theme
+
+**Key decisions:**
+- Pages are server components — data is fetched at request time (`cache: "no-store"`) directly from FastAPI
+- `AcknowledgeButton` is the only client component — needed for the click handler
+- Service heatmap is computed entirely from `/drift-history` data on the client — no extra endpoint needed
+- Engineer IDs in Neo4j use the `gh_{username}` format (set by the GitHub adapter's `unified_user_id`). Links from `DriftCard` use `/engineer/gh_${owner}` accordingly
+- `params` in dynamic routes is a `Promise<{ id: string }>` in Next.js 16 — must be awaited
+
+**How to run:**
+```bash
+cd dashboard && npm run dev
+# → http://localhost:3000
+```
+
+Requires FastAPI running on `localhost:8000` (see session startup instructions below).
+
+**Live test results:**
+- Drift feed loaded all 8 events with correct severity badges, reasoning, and specs
+- Service heatmap showed `reasoning` (5 hits, red) and `test_graph` (1, yellow)
+- Engineer view at `/engineer/gh_parks3131` showed 5 PRs, 4 drifts, PR #20 correctly showing "Aligned"
+- Acknowledge button on PR #19 flipped to "✓ Acknowledged" and updated Supabase in real time
 
 ---
 
@@ -507,6 +546,9 @@ All secrets live in `reasoning/.env` — never committed. Template in `reasoning
 | `SUPABASE_URL` | supabase.com project settings | Supabase DB client |
 | `SUPABASE_KEY` | supabase.com project settings → API Keys → Secret | Supabase DB client |
 | `SLACK_WEBHOOK_URL` | Phase 6 — api.slack.com/apps | Post drift alerts |
+| `NEO4J_URI` | console.neo4j.io → Aura instance → Connect | Graph DB connection |
+| `NEO4J_USER` | console.neo4j.io (shown at creation) | Graph DB auth |
+| `NEO4J_PASSWORD` | console.neo4j.io (shown once at creation) | Graph DB auth |
 
 **Rotate all tokens after sharing in chat.** Generate new ones and update `.env` directly.
 
@@ -526,3 +568,9 @@ ngrok http 8000
 ```
 
 Update the GitHub webhook URL at `github.com/parks3131/Interstellar/settings/hooks` if ngrok gave you a new URL (ngrok free tier gives a new URL every restart).
+
+```bash
+# Start dashboard (third terminal, Phase 8+)
+cd ~/Developer/Interstellar/dashboard && npm run dev
+# → http://localhost:3000
+```
