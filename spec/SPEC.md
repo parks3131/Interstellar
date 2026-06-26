@@ -381,7 +381,7 @@ Slack message appeared in `#drift-alerts` instantly when the PR was opened. Seve
 
 ---
 
-## Phase 7 — Graph Layer (after Phase 6)
+## Phase 7 — Graph Layer ✅
 
 **Goal:** Connect entities across tools into a knowledge graph so Interstellar can answer relationship questions — not just log events.
 
@@ -390,21 +390,64 @@ Slack message appeared in `#drift-alerts` instantly when the PR was opened. Seve
 **Questions the graph enables:**
 - Which engineers consistently drift on the same service?
 - Which Jira tickets share the same service scope and are likely to conflict?
-- Which Slack decisions influenced the most scope creep?
 - Show me everything connected to this incident
 
-**What to build:**
-- Neo4j Aura (free tier — hosted, no infra)
-- Nodes: `Engineer`, `PR`, `JiraTicket`, `Service`, `DriftEvent`
-- Edges: `authored`, `linked_to`, `scoped_to`, `drifted_on`, `produced`
-- Populate graph on every drift event (alongside Postgres write)
-- New endpoint: `GET /graph/engineer/:id` — returns all PRs, tickets, services connected to an engineer
+**What was built:**
+
+| File | Change |
+|---|---|
+| `reasoning/main.py` | `GraphDatabase.driver` init (degrades if env vars absent), `_save_to_graph()`, `_save_drift_to_graph()`, `GET /graph/engineer/{id}` |
+| `reasoning/requirements.txt` | Added `neo4j==5.22.0` |
+| `reasoning/.env.example` | Added `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` |
+
+**Graph write is split into two functions:**
+
+`_save_to_graph()` — called on **every PR** regardless of drift:
+- Writes `Engineer`, `PR`, `JiraTicket`, `Service` nodes
+- Writes `AUTHORED`, `LINKED_TO`, `SCOPED_TO` edges
+
+`_save_drift_to_graph()` — called **only when drift detected**, layered on top:
+- Creates `DriftEvent` node
+- Writes `PRODUCED`, `DRIFTED_ON` edges
+
+This split means aligned PRs are still in the graph — enabling ratio tracking, service ownership mapping, and conflict prediction — while drift signals are layered on top.
+
+**Nodes (all MERGE except DriftEvent which is CREATE):**
+- `Engineer {id, name}`
+- `PR {id, number, repo, title}`
+- `JiraTicket {id, title}`
+- `Service {id}`
+- `DriftEvent {id, severity, reasoning}`
+
+**Edges:**
+- `(Engineer)-[:AUTHORED]->(PR)`
+- `(PR)-[:LINKED_TO]->(JiraTicket)`
+- `(JiraTicket)-[:SCOPED_TO]->(Service)` — from `intent.scoped_services`
+- `(PR)-[:DRIFTED_ON]->(Service)` — from `spec.affected_services`
+- `(DriftEvent)-[:PRODUCED]->(PR)`
+
+**New endpoint:**
+- `GET /graph/engineer/{engineer_id}` — returns engineer + all PRs with linked Jira keys, drifted services, and drift events
 
 **Storage split:**
 ```
 Postgres (Supabase)     →  event log — what happened, when
 Neo4j (Aura)            →  knowledge graph — how entities connect
 ```
+
+**New env vars required:**
+```
+NEO4J_URI=neo4j+s://xxxxxxxx.databases.neo4j.io   # from console.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_generated_password
+```
+
+**Live test results:**
+- PR #20 (SCRUM-8, aligned) — `[graph] base nodes written`, no DriftEvent node
+- PR #18 (SCRUM-5, drifted) — `[graph] base nodes written` + `[graph] drift event written`
+- Neo4j graph shows parks3131 at center with all PRs radiating out; drifted PRs have pink DriftEvent nodes, aligned PRs do not
+
+**Setup:** Create a free Aura instance at console.neo4j.io — provisions in ~2 minutes. Download credentials immediately (shown only once).
 
 ---
 
